@@ -23,24 +23,48 @@ def get_drive_service():
 drive_service = get_drive_service()
 FOLDER_ID = st.secrets["drive"]["folder_id"]
 
-# ====================== CARGAR PRODUCTOS ======================
+# ====================== CARGAR Y LIMPIAR PRODUCTOS ======================
 @st.cache_data(ttl=300)
 def cargar_productos():
     df = conn.read(worksheet="Productos")
-    return df.dropna(how="all")
+    df = df.dropna(how="all")
+    
+    # Convertir todas las columnas de precio a número (N/A y vacíos → NaN)
+    price_cols = ['precio_1','precio_5','precio_10','precio_20','precio_30',
+                  'precio_50','precio_100','precio_200','precio_500',
+                  'precio_1000','precio_3000']
+    df[price_cols] = df[price_cols].apply(pd.to_numeric, errors='coerce')
+    return df
 
 productos_df = cargar_productos()
 
-# ====================== PRECIO SEGÚN ESCALA ======================
+# ====================== PRECIO SEGÚN ESCALA (ROBUSTO) ======================
 def obtener_precio(row, cantidad):
     thresholds = [1, 5, 10, 20, 30, 50, 100, 200, 500, 1000, 3000]
     cols = ['precio_1','precio_5','precio_10','precio_20','precio_30',
-            'precio_50','precio_100','precio_200','precio_500','precio_1000','precio_3000']
+            'precio_50','precio_100','precio_200','precio_500',
+            'precio_1000','precio_3000']
     
+    # Buscar el precio más adecuado (el último válido antes de la cantidad)
     for i, thresh in enumerate(thresholds):
         if cantidad < thresh:
-            return float(row[cols[i-1]] if i > 0 else row['precio_1'])
-    return float(row['precio_3000'])
+            # Tomar el precio anterior (el más cercano por debajo)
+            for j in range(i-1, -1, -1):          # buscar hacia atrás
+                val = row[cols[j]]
+                if pd.notna(val):
+                    return float(val)
+            # Si ninguno es válido, tomar el primero disponible
+            for val in row[cols]:
+                if pd.notna(val):
+                    return float(val)
+            return 0.0  # fallback
+    
+    # Cantidad >= 3000 → usar precio_3000 o el último válido
+    for j in range(len(cols)-1, -1, -1):
+        val = row[cols[j]]
+        if pd.notna(val):
+            return float(val)
+    return 0.0
 
 # ====================== NÚMERO CONSECUTIVO ======================
 def obtener_siguiente_numero():
@@ -49,7 +73,7 @@ def obtener_siguiente_numero():
     conn.update(worksheet="Config", data=pd.DataFrame([[num + 1]]), range="B1")
     return num
 
-# ====================== PLANTILLA HTML (CORREGIDA) ======================
+# ====================== PLANTILLA HTML ======================
 html_template = Template("""
 <!DOCTYPE html>
 <html>
@@ -152,7 +176,7 @@ with col3:
             "precio_unitario": precio,
             "total_linea": cantidad * precio
         })
-        st.success(f"{producto_sel} agregado")
+        st.success(f"{producto_sel} agregado (precio según escala)")
 
 if st.session_state.items:
     df_items = pd.DataFrame(st.session_state.items)
@@ -179,7 +203,6 @@ if st.button("🚀 Generar y Guardar PDF completo (6 páginas)", type="primary")
         </table><br>
         """
 
-    # Formateamos el total aquí para evitar error de Jinja
     total_general_formatted = f"{total_general:,.0f}"
 
     html_final = html_template.render(
