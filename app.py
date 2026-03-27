@@ -61,17 +61,19 @@ def obtener_precio(row, cantidad):
 
 # ====================== NÚMERO CONSECUTIVO ======================
 def obtener_siguiente_numero():
-    # Leer sin cache para siempre obtener el valor actual
-    df_config = conn.read(worksheet="Config", ttl=0)
+    # Leer sin header: la fila 1 tiene los datos (next_number | 1)
+    df_config = conn.read(worksheet="Config", ttl=0, header=None)
     df_config = df_config.dropna(how="all")
-    # conn.read() usa la fila 1 como header, el numero queda en iloc[0, 1]
+    # La estructura es: A1=next_number, B1=valor_actual
+    # Con header=None, iloc[0,0]=next_number, iloc[0,1]=el numero
     try:
         num = int(float(str(df_config.iloc[0, 1]).strip()))
     except (ValueError, IndexError, TypeError) as e:
-        st.error(f"Error leyendo Config: {e}. Verifica que B2 tenga el numero consecutivo.")
+        st.error(f"Error leyendo Config: {e}. La celda B1 debe contener el numero consecutivo.")
         st.stop()
-    df_config.iloc[0, 1] = num + 1
-    conn.update(worksheet="Config", data=df_config)
+    # Escribir el numero incrementado manteniendo A1 intacto
+    df_updated = pd.DataFrame([[df_config.iloc[0, 0], num + 1]])
+    conn.update(worksheet="Config", data=df_updated)
     return num
 
 # ====================== PLANTILLA HTML ======================
