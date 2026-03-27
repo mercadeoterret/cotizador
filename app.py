@@ -16,7 +16,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_resource
 def get_drive_service():
-    creds_dict = st.secrets["connections"]["gsheets"]   # ← usa exactamente tu secrets.toml
+    creds_dict = st.secrets["connections"]["gsheets"]
     creds = service_account.Credentials.from_service_account_info(creds_dict)
     return build('drive', 'v3', credentials=creds)
 
@@ -31,7 +31,7 @@ def cargar_productos():
 
 productos_df = cargar_productos()
 
-# ====================== PRECIO SEGÚN ESCALA (PORTALOFIO 2026) ======================
+# ====================== PRECIO SEGÚN ESCALA ======================
 def obtener_precio(row, cantidad):
     thresholds = [1, 5, 10, 20, 30, 50, 100, 200, 500, 1000, 3000]
     cols = ['precio_1','precio_5','precio_10','precio_20','precio_30',
@@ -40,16 +40,16 @@ def obtener_precio(row, cantidad):
     for i, thresh in enumerate(thresholds):
         if cantidad < thresh:
             return float(row[cols[i-1]] if i > 0 else row['precio_1'])
-    return float(row['precio_3000'])  # para 3000 o más
+    return float(row['precio_3000'])
 
 # ====================== NÚMERO CONSECUTIVO ======================
 def obtener_siguiente_numero():
     df_config = conn.read(worksheet="Config")
-    num = int(df_config.iloc[0, 1])  # columna B
+    num = int(df_config.iloc[0, 1])
     conn.update(worksheet="Config", data=pd.DataFrame([[num + 1]]), range="B1")
     return num
 
-# ====================== PLANTILLA HTML 6 PÁGINAS ======================
+# ====================== PLANTILLA HTML (CORREGIDA) ======================
 html_template = Template("""
 <!DOCTYPE html>
 <html>
@@ -66,53 +66,52 @@ html_template = Template("""
 </style></head>
 <body>
 
-<!-- PÁGINA 1 - PORTADA -->
+<!-- PÁGINA 1 -->
 <div class="header">Envigado, Colombia<br><strong>{{ fecha }}</strong></div>
 <h1 style="text-align:center; margin-top:90px;">Cotización</h1>
 <h2 style="text-align:center;">{{ cliente }}</h2>
 <p style="text-align:justify; margin-top:60px; font-size:12px;">
-En Terret, el proceso de Custom representa la máxima expresión de personalización y pasión en ofrecer productos con un enfoque específico, con alto valor agregado en desarrollo y diseño. Ofrecemos a nuestros clientes la oportunidad de participar activamente en la creación de prendas únicas, desde el diseño inicial hasta la entrega final del producto. Nos comprometemos a acompañar el crecimiento y a brindarles la oportunidad de expresar su individualidad a través de prendas hechas a medida que reflejen su esencia y pasión.
+En Terret, el proceso de Custom representa la máxima expresión de personalización y pasión...
 </p>
 <div class="footer">www.terret.co • CI. 46A Sur #4881, Zona 1, Envigado, Antioquia, Colombia • @terretsports • info@terret.co</div>
 
-<!-- PÁGINA 2 - PORTAFOLIO -->
+<!-- PÁGINA 2 -->
 <div class="page-break">
     <h2 class="titulo">PORTAFOLIO CAMISETAS 2026</h2>
     <p style="text-align:center;">LÍNEA BOSTON • LÍNEA CHICAGO • ESPECIFICACIONES DE TELA</p>
-    <!-- Agrega aquí tus imágenes cuando quieras -->
 </div>
 
-<!-- PÁGINA 3 - PROPUESTA COMERCIAL DINÁMICA -->
+<!-- PÁGINA 3 -->
 <div class="page-break">
     <h2 class="titulo">{{ titulo_propuesta }}</h2>
     {{ html_tablas | safe }}
     <p style="text-align:center; font-size:18px; margin-top:30px;">
-        <strong>TOTAL GENERAL: ${{ total_general | format_number }}</strong>
+        <strong>TOTAL GENERAL: ${{ total_general_formatted }}</strong>
     </p>
 </div>
 
-<!-- PÁGINA 4 - MERCH CONVENIO ANUAL -->
+<!-- PÁGINA 4 -->
 <div class="page-break">
     <h2 class="titulo">PROPUESTA COMERCIAL MERCH, POR CONVENIO ANUAL</h2>
-    <p style="text-align:center;">(Puedes copiar aquí la tabla de tu Canva por ahora)</p>
+    <p style="text-align:center;">(Tabla de convenio anual - puedes mejorarla después)</p>
 </div>
 
-<!-- PÁGINA 5 - BENEFICIOS -->
+<!-- PÁGINA 5 -->
 <div class="page-break">
     <h2 class="titulo">BENEFICIOS EXTRAS</h2>
     <ul style="font-size:12px;">
-        <li>Terret otorgará código de descuento para todos los inscritos a la carrera, personalizado con un descuento del 20%</li>
-        <li>Visualización en las redes sociales de TERRET (40.200 seguidores) y promoción por embajadores</li>
-        <li>Diseño del Merch oficial de la carrera con precios especiales y utilidad mínima del 35%</li>
+        <li>Terret otorgará código de descuento del 20% para todos los inscritos</li>
+        <li>Visualización en redes sociales de TERRET (40.200 seguidores)</li>
+        <li>Diseño del Merch oficial con utilidad mínima del 35%</li>
         <li>Banner en página web de TERRET (+25.000 sesiones mensuales)</li>
     </ul>
 </div>
 
-<!-- PÁGINA 6 - TÉRMINOS -->
+<!-- PÁGINA 6 -->
 <div class="page-break">
     <h2 class="titulo">Términos y Condiciones del proceso Alianza de Eventos</h2>
     <p style="font-size:11px; text-align:justify;">
-        Opciones de Diseño • Insumos de tu parte • Tiempo de Producción 30 días hábiles • Ficha Técnica y Aceptación • Pagos 50% anticipo • Costos de envío no incluidos.
+        Opciones de Diseño • Insumos de tu parte • Tiempo de Producción 30 días hábiles • Ficha Técnica • Pagos 50% anticipo • Costos de envío no incluidos.
     </p>
     <p style="margin-top:120px; text-align:center;">FIRMA CLIENTE ___________________<br>JUAN FELIPE GÓMEZ – DIRECTOR DE MARCA – TERRET SAS</p>
     <div class="footer">www.terret.co • CI. 46A Sur #4881, Zona 1, Envigado, Antioquia, Colombia • @terretsports • info@terret.co</div>
@@ -153,7 +152,7 @@ with col3:
             "precio_unitario": precio,
             "total_linea": cantidad * precio
         })
-        st.success(f"{producto_sel} agregado – precio según escala aplicada")
+        st.success(f"{producto_sel} agregado")
 
 if st.session_state.items:
     df_items = pd.DataFrame(st.session_state.items)
@@ -180,24 +179,26 @@ if st.button("🚀 Generar y Guardar PDF completo (6 páginas)", type="primary")
         </table><br>
         """
 
+    # Formateamos el total aquí para evitar error de Jinja
+    total_general_formatted = f"{total_general:,.0f}"
+
     html_final = html_template.render(
         fecha=fecha.strftime("%d de %B del %Y").upper(),
         cliente=cliente.upper(),
         titulo_propuesta=titulo_propuesta,
         html_tablas=tablas_html,
-        total_general=total_general
+        total_general_formatted=total_general_formatted
     )
 
     pdf_bytes = HTML(string=html_final).write_pdf()
 
     filename = f"Cotizacion_{numero:04d}_{cliente.replace(' ', '_')}.pdf"
 
-    # Subir a carpeta Cotizador
     file_metadata = {'name': filename, 'parents': [FOLDER_ID]}
     media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf')
     drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
 
-    st.success(f"✅ Cotización #{numero:04d} generada y guardada en la carpeta Cotizador")
+    st.success(f"✅ Cotización #{numero:04d} guardada en la carpeta Cotizador")
     st.balloons()
 
     st.download_button("📥 Descargar PDF ahora", data=pdf_bytes, file_name=filename, mime="application/pdf")
