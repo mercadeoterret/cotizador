@@ -23,13 +23,11 @@ def get_drive_service():
 drive_service = get_drive_service()
 FOLDER_ID = st.secrets["drive"]["folder_id"]
 
-# ====================== CARGAR Y LIMPIAR PRODUCTOS ======================
+# ====================== CARGAR PRODUCTOS ======================
 @st.cache_data(ttl=300)
 def cargar_productos():
     df = conn.read(worksheet="Productos")
     df = df.dropna(how="all")
-    
-    # Convertir todas las columnas de precio a número (N/A y vacíos → NaN)
     price_cols = ['precio_1','precio_5','precio_10','precio_20','precio_30',
                   'precio_50','precio_100','precio_200','precio_500',
                   'precio_1000','precio_3000']
@@ -38,28 +36,23 @@ def cargar_productos():
 
 productos_df = cargar_productos()
 
-# ====================== PRECIO SEGÚN ESCALA (ROBUSTO) ======================
+# ====================== PRECIO SEGÚN ESCALA ======================
 def obtener_precio(row, cantidad):
     thresholds = [1, 5, 10, 20, 30, 50, 100, 200, 500, 1000, 3000]
     cols = ['precio_1','precio_5','precio_10','precio_20','precio_30',
             'precio_50','precio_100','precio_200','precio_500',
             'precio_1000','precio_3000']
     
-    # Buscar el precio más adecuado (el último válido antes de la cantidad)
     for i, thresh in enumerate(thresholds):
         if cantidad < thresh:
-            # Tomar el precio anterior (el más cercano por debajo)
-            for j in range(i-1, -1, -1):          # buscar hacia atrás
+            for j in range(i-1, -1, -1):
                 val = row[cols[j]]
                 if pd.notna(val):
                     return float(val)
-            # Si ninguno es válido, tomar el primero disponible
             for val in row[cols]:
                 if pd.notna(val):
                     return float(val)
-            return 0.0  # fallback
-    
-    # Cantidad >= 3000 → usar precio_3000 o el último válido
+            return 0.0
     for j in range(len(cols)-1, -1, -1):
         val = row[cols[j]]
         if pd.notna(val):
@@ -90,7 +83,6 @@ html_template = Template("""
 </style></head>
 <body>
 
-<!-- PÁGINA 1 -->
 <div class="header">Envigado, Colombia<br><strong>{{ fecha }}</strong></div>
 <h1 style="text-align:center; margin-top:90px;">Cotización</h1>
 <h2 style="text-align:center;">{{ cliente }}</h2>
@@ -99,13 +91,11 @@ En Terret, el proceso de Custom representa la máxima expresión de personalizac
 </p>
 <div class="footer">www.terret.co • CI. 46A Sur #4881, Zona 1, Envigado, Antioquia, Colombia • @terretsports • info@terret.co</div>
 
-<!-- PÁGINA 2 -->
 <div class="page-break">
     <h2 class="titulo">PORTAFOLIO CAMISETAS 2026</h2>
     <p style="text-align:center;">LÍNEA BOSTON • LÍNEA CHICAGO • ESPECIFICACIONES DE TELA</p>
 </div>
 
-<!-- PÁGINA 3 -->
 <div class="page-break">
     <h2 class="titulo">{{ titulo_propuesta }}</h2>
     {{ html_tablas | safe }}
@@ -114,13 +104,11 @@ En Terret, el proceso de Custom representa la máxima expresión de personalizac
     </p>
 </div>
 
-<!-- PÁGINA 4 -->
 <div class="page-break">
     <h2 class="titulo">PROPUESTA COMERCIAL MERCH, POR CONVENIO ANUAL</h2>
     <p style="text-align:center;">(Tabla de convenio anual - puedes mejorarla después)</p>
 </div>
 
-<!-- PÁGINA 5 -->
 <div class="page-break">
     <h2 class="titulo">BENEFICIOS EXTRAS</h2>
     <ul style="font-size:12px;">
@@ -131,7 +119,6 @@ En Terret, el proceso de Custom representa la máxima expresión de personalizac
     </ul>
 </div>
 
-<!-- PÁGINA 6 -->
 <div class="page-break">
     <h2 class="titulo">Términos y Condiciones del proceso Alianza de Eventos</h2>
     <p style="font-size:11px; text-align:justify;">
@@ -156,9 +143,11 @@ titulo_propuesta = st.selectbox("Título de la propuesta comercial", titulos + [
 if titulo_propuesta == "Personalizado...":
     titulo_propuesta = st.text_input("Escribe el título personalizado")
 
-st.subheader("Agregar productos")
+# Inicialización segura de la lista
 if "items" not in st.session_state:
     st.session_state.items = []
+
+st.subheader("Agregar productos")
 
 col1, col2, col3 = st.columns([3, 1, 1])
 with col1:
@@ -178,6 +167,7 @@ with col3:
         })
         st.success(f"{producto_sel} agregado (precio según escala)")
 
+# Mostrar tabla de forma segura
 if st.session_state.items:
     df_items = pd.DataFrame(st.session_state.items)
     st.dataframe(df_items, use_container_width=True)
