@@ -133,8 +133,8 @@ En Terret, el proceso de Custom representa la máxima expresión de personalizac
 """)
 
 # ====================== INICIALIZACIÓN SEGURA DEL SESSION STATE ======================
-if "items" not in st.session_state:
-    st.session_state.items = []
+if "productos_cotizacion" not in st.session_state:
+    st.session_state.productos_cotizacion = []
 
 # ====================== INTERFAZ ======================
 st.title("📄 Cotizador Terret 2026")
@@ -158,7 +158,7 @@ with col3:
     if st.button("➕ Agregar"):
         row = productos_df[productos_df["nombre_producto"] == producto_sel].iloc[0]
         precio = obtener_precio(row, cantidad)
-        st.session_state.items.append({
+        st.session_state.productos_cotizacion.append({
             "referencia": str(row.get("referencia", "")),
             "nombre": str(row["nombre_producto"]),
             "cantidad": cantidad,
@@ -168,18 +168,18 @@ with col3:
         st.success(f"{producto_sel} agregado (precio según escala)")
 
 # Mostrar tabla de forma SEGURA
-if st.session_state.items:
-    df_items = pd.DataFrame(st.session_state.items)
+if st.session_state.productos_cotizacion:
+    df_items = pd.DataFrame(st.session_state.productos_cotizacion)
     st.dataframe(df_items, use_container_width=True)
     total_general = df_items["total_linea"].sum()
     st.metric("TOTAL GENERAL (antes de IVA)", f"${total_general:,.0f}")
 
 # ====================== GENERAR PDF ======================
-if st.button("🚀 Generar y Guardar PDF completo (6 páginas)", type="primary") and st.session_state.items:
+if st.button("🚀 Generar y Guardar PDF completo (6 páginas)", type="primary") and st.session_state.productos_cotizacion:
     numero = obtener_siguiente_numero()
 
     tablas_html = ""
-    for item in st.session_state.items:
+    for item in st.session_state.productos_cotizacion:
         subtotal = item["total_linea"]
         iva = subtotal * 0.19
         total_con_iva = subtotal + iva
@@ -216,4 +216,4 @@ if st.button("🚀 Generar y Guardar PDF completo (6 páginas)", type="primary")
 
     st.download_button("📥 Descargar PDF ahora", data=pdf_bytes, file_name=filename, mime="application/pdf")
 
-    st.session_state.items = []   # Limpiar después de generar
+    st.session_state.productos_cotizacion = []   # Limpiar después de generar
