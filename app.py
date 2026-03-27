@@ -27,7 +27,62 @@ def get_drive_service():
     return build("drive", "v3", credentials=creds)
 
 drive_service = get_drive_service()
-FOLDER_ID = st.secrets["drive"]["folder_id"]
+ROOT_FOLDER_ID = st.secrets["drive"]["folder_id"]  # Carpeta raíz "Cotizaciones"
+
+# ====================== GESTIÓN DE CARPETAS EN DRIVE ======================
+def obtener_o_crear_carpeta(nombre, parent_id):
+    """Busca una carpeta por nombre dentro de parent_id. Si no existe, la crea."""
+    nombre_escapado = nombre.replace("'", "\\'")
+    query = (
+        f"name='{nombre_escapado}' "
+        f"and '{parent_id}' in parents "
+        f"and mimeType='application/vnd.google-apps.folder' "
+        f"and trashed=false"
+    )
+    results = drive_service.files().list(
+        q=query,
+        fields="files(id, name)",
+        spaces="drive"
+    ).execute()
+    archivos = results.get("files", [])
+    if archivos:
+        return archivos[0]["id"]
+    # No existe → crear
+    metadata = {
+        "name": nombre,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_id]
+    }
+    carpeta = drive_service.files().create(body=metadata, fields="id").execute()
+    return carpeta["id"]
+
+def obtener_carpeta_destino(anio, tipo, cliente):
+    """Estructura: Cotizaciones / 2026 / Eventos / NOMBRE_CLIENTE"""
+    id_anio    = obtener_o_crear_carpeta(str(anio), ROOT_FOLDER_ID)
+    id_tipo    = obtener_o_crear_carpeta(tipo,       id_anio)
+    id_cliente = obtener_o_crear_carpeta(cliente,    id_tipo)
+    return id_cliente
+
+# ====================== LISTAR CLIENTES EXISTENTES DESDE DRIVE ======================
+@st.cache_data(ttl=60)
+def listar_clientes_en_drive(anio, tipo):
+    """Lista las subcarpetas de Cotizaciones/Año/Tipo para mostrar clientes ya creados."""
+    try:
+        id_anio = obtener_o_crear_carpeta(str(anio), ROOT_FOLDER_ID)
+        id_tipo = obtener_o_crear_carpeta(tipo, id_anio)
+        query = (
+            f"'{id_tipo}' in parents "
+            f"and mimeType='application/vnd.google-apps.folder' "
+            f"and trashed=false"
+        )
+        results = drive_service.files().list(
+            q=query,
+            fields="files(name)",
+            orderBy="name"
+        ).execute()
+        return [f["name"] for f in results.get("files", [])]
+    except Exception:
+        return []
 
 # ====================== CARGAR PRODUCTOS ======================
 @st.cache_data(ttl=300)
@@ -48,7 +103,6 @@ def obtener_precio(row, cantidad):
     cols = ['precio_1','precio_5','precio_10','precio_20','precio_30',
             'precio_50','precio_100','precio_200','precio_500',
             'precio_1000','precio_3000']
-    
     for i, thresh in enumerate(thresholds):
         if cantidad < thresh:
             for j in range(i-1, -1, -1):
@@ -67,17 +121,13 @@ def obtener_precio(row, cantidad):
 
 # ====================== NÚMERO CONSECUTIVO ======================
 def obtener_siguiente_numero():
-    # Leer sin header: la fila 1 tiene los datos (next_number | 1)
     df_config = conn.read(worksheet="Config", ttl=0, header=None)
     df_config = df_config.dropna(how="all")
-    # La estructura es: A1=next_number, B1=valor_actual
-    # Con header=None, iloc[0,0]=next_number, iloc[0,1]=el numero
     try:
         num = int(float(str(df_config.iloc[0, 1]).strip()))
     except (ValueError, IndexError, TypeError) as e:
         st.error(f"Error leyendo Config: {e}. La celda B1 debe contener el numero consecutivo.")
         st.stop()
-    # Escribir el numero incrementado manteniendo A1 intacto
     df_updated = pd.DataFrame([[df_config.iloc[0, 0], num + 1]])
     conn.update(worksheet="Config", data=df_updated)
     return num
@@ -148,22 +198,70 @@ En Terret, el proceso de Custom representa la máxima expresión de personalizac
 </html>
 """)
 
-# ====================== INICIALIZACIÓN SEGURA DEL SESSION STATE ======================
+# ====================== SESSION STATE ======================
 if "productos_cotizacion" not in st.session_state:
     st.session_state.productos_cotizacion = []
 
 # ====================== INTERFAZ ======================
 st.title("📄 Cotizador Terret 2026")
 
-cliente = st.text_input("Nombre del cliente / Evento", "RUNNING BUCARAMANGA")
-fecha = st.date_input("Fecha de cotización", datetime.today())
+# --- Tipo, Año y Fecha ---
+col_tipo, col_anio, col_fecha = st.columns([2, 1, 2])
+with col_tipo:
+    tipo_propuesta = st.selectbox(
+        "Tipo de propuesta",
+        ["Eventos", "Custom"],
+        help="Define en qué carpeta de Drive se guardará la cotización"
+    )
+with col_anio:
+    anio = st.number_input("Año", min_value=2024, max_value=2030,
+                           value=datetime.today().year, step=1)
+with col_fecha:
+    fecha = st.date_input("Fecha de cotización", datetime.today())
 
-titulos = ["PROPUESTA COMERCIAL CAMISETAS", "PROPUESTA COMERCIAL MERCH", "PROPUESTA COMERCIAL EVENTO", "PROPUESTA COMERCIAL KIT"]
-titulo_propuesta = st.selectbox("Título de la propuesta comercial", titulos + ["Personalizado..."])
+st.divider()
+
+# --- Selector de cliente ---
+st.subheader("👤 Cliente")
+
+clientes_existentes = listar_clientes_en_drive(anio, tipo_propuesta)
+opciones_cliente = ["➕ Nuevo cliente"] + clientes_existentes
+
+col_sel, col_nuevo = st.columns([2, 3])
+with col_sel:
+    seleccion = st.selectbox(
+        f"Clientes en {tipo_propuesta} / {anio}",
+        opciones_cliente,
+        help="Clientes con cotizaciones previas en esta categoría"
+    )
+
+if seleccion == "➕ Nuevo cliente":
+    with col_nuevo:
+        cliente = st.text_input("Nombre del nuevo cliente / Evento", "").strip().upper()
+    if not cliente:
+        st.warning("✏️ Escribe el nombre del cliente para continuar.")
+        cliente = ""
+else:
+    cliente = seleccion
+    with col_nuevo:
+        st.info(f"📁 Se guardará en la carpeta existente: **{cliente}**")
+
+st.divider()
+
+# --- Título propuesta ---
+titulos_map = {
+    "Eventos": ["PROPUESTA COMERCIAL EVENTO", "PROPUESTA COMERCIAL MERCH", "PROPUESTA COMERCIAL KIT"],
+    "Custom":  ["PROPUESTA COMERCIAL CUSTOM", "PROPUESTA COMERCIAL CAMISETAS"],
+}
+titulos_disponibles = titulos_map.get(tipo_propuesta, []) + ["Personalizado..."]
+titulo_propuesta = st.selectbox("Título de la propuesta comercial", titulos_disponibles)
 if titulo_propuesta == "Personalizado...":
     titulo_propuesta = st.text_input("Escribe el título personalizado")
 
-st.subheader("Agregar productos")
+st.divider()
+
+# --- Agregar productos ---
+st.subheader("🛍️ Productos")
 
 col1, col2, col3 = st.columns([3, 1, 1])
 with col1:
@@ -171,7 +269,9 @@ with col1:
 with col2:
     cantidad = st.number_input("Cantidad", min_value=1, value=1)
 with col3:
-    if st.button("➕ Agregar"):
+    st.write("")
+    st.write("")
+    if st.button("➕ Agregar", use_container_width=True):
         row = productos_df[productos_df["nombre_producto"] == producto_sel].iloc[0]
         precio = obtener_precio(row, cantidad)
         st.session_state.productos_cotizacion.append({
@@ -181,71 +281,111 @@ with col3:
             "precio_unitario": precio,
             "total_linea": cantidad * precio
         })
-        st.success(f"{producto_sel} agregado (precio según escala)")
+        st.success(f"✅ {producto_sel} agregado")
 
-# Mostrar tabla de forma SEGURA
+# --- Tabla de productos ---
 total_general = 0.0
 if st.session_state.productos_cotizacion:
     df_items = pd.DataFrame(st.session_state.productos_cotizacion)
-    st.dataframe(df_items, use_container_width=True)
+
+    col_tabla, col_acciones = st.columns([5, 1])
+    with col_tabla:
+        st.dataframe(
+            df_items[["referencia", "nombre", "cantidad", "precio_unitario", "total_linea"]],
+            use_container_width=True
+        )
+    with col_acciones:
+        st.write("Eliminar")
+        for i in range(len(st.session_state.productos_cotizacion)):
+            if st.button("🗑️", key=f"del_{i}"):
+                st.session_state.productos_cotizacion.pop(i)
+                st.rerun()
+
     total_general = float(df_items["total_linea"].sum())
-    st.metric("TOTAL GENERAL (antes de IVA)", f"${total_general:,.0f}")
+    col_total, col_limpiar = st.columns([3, 1])
+    with col_total:
+        st.metric("TOTAL GENERAL (antes de IVA)", f"${total_general:,.0f}")
+    with col_limpiar:
+        st.write("")
+        if st.button("🗑️ Limpiar todo", type="secondary", use_container_width=True):
+            st.session_state.productos_cotizacion = []
+            st.rerun()
+
+st.divider()
 
 # ====================== GENERAR PDF ======================
-if st.button("🚀 Generar y Guardar PDF completo (6 páginas)", type="primary") and st.session_state.productos_cotizacion:
-    numero = obtener_siguiente_numero()
+puede_generar = bool(st.session_state.productos_cotizacion) and bool(cliente)
+if not puede_generar:
+    st.info("Agrega al menos un producto y selecciona/escribe un cliente para generar la cotización.")
 
-    tablas_html = ""
-    for item in st.session_state.productos_cotizacion:
-        subtotal = item["total_linea"]
-        iva = subtotal * 0.19
-        total_con_iva = subtotal + iva
-        tablas_html += f"""
-        <table>
-            <tr><th>Referencia</th><th>Cantidad</th><th>Valor unitario</th><th>TOTAL</th></tr>
-            <tr><td>{item['referencia']}</td><td>{item['cantidad']}</td><td>${item['precio_unitario']:,.0f}</td><td>${subtotal:,.0f}</td></tr>
-            <tr><td colspan="3" style="text-align:right;">SUBTOTAL</td><td>${subtotal:,.0f}</td></tr>
-            <tr><td colspan="3" style="text-align:right;">IVA 19%</td><td>${iva:,.0f}</td></tr>
-            <tr><td colspan="3" style="text-align:right;"><strong>TOTAL</strong></td><td><strong>${total_con_iva:,.0f}</strong></td></tr>
-        </table><br>
-        """
+if st.button("🚀 Generar y Guardar PDF", type="primary", disabled=not puede_generar):
+    with st.status("Generando cotización...", expanded=True) as status:
 
-    total_general_formatted = f"{total_general:,.0f}"
+        st.write("📄 Construyendo PDF...")
+        numero = obtener_siguiente_numero()
 
-    html_final = html_template.render(
-        fecha=fecha.strftime("%d de %B del %Y").upper(),
-        cliente=cliente.upper(),
-        titulo_propuesta=titulo_propuesta,
-        html_tablas=tablas_html,
-        total_general_formatted=total_general_formatted
-    )
+        tablas_html = ""
+        for item in st.session_state.productos_cotizacion:
+            subtotal = item["total_linea"]
+            iva = subtotal * 0.19
+            total_con_iva = subtotal + iva
+            tablas_html += f"""
+            <table>
+                <tr><th>Referencia</th><th>Producto</th><th>Cantidad</th><th>Valor unitario</th><th>TOTAL</th></tr>
+                <tr>
+                    <td>{item['referencia']}</td><td>{item['nombre']}</td>
+                    <td>{item['cantidad']}</td>
+                    <td>${item['precio_unitario']:,.0f}</td>
+                    <td>${subtotal:,.0f}</td>
+                </tr>
+                <tr><td colspan="4" style="text-align:right;">SUBTOTAL</td><td>${subtotal:,.0f}</td></tr>
+                <tr><td colspan="4" style="text-align:right;">IVA 19%</td><td>${iva:,.0f}</td></tr>
+                <tr><td colspan="4" style="text-align:right;"><strong>TOTAL</strong></td>
+                    <td><strong>${total_con_iva:,.0f}</strong></td></tr>
+            </table><br>
+            """
 
-    pdf_bytes = HTML(string=html_final).write_pdf()
+        html_final = html_template.render(
+            fecha=fecha.strftime("%d de %B del %Y").upper(),
+            cliente=cliente.upper(),
+            titulo_propuesta=titulo_propuesta,
+            html_tablas=tablas_html,
+            total_general_formatted=f"{total_general:,.0f}"
+        )
+        pdf_bytes = HTML(string=html_final).write_pdf()
 
-    filename = f"Cotizacion_{numero:04d}_{cliente.replace(' ', '_')}.pdf"
+        st.write(f"📁 Creando estructura: Cotizaciones / {anio} / {tipo_propuesta} / {cliente} ...")
+        try:
+            carpeta_destino_id = obtener_carpeta_destino(anio, tipo_propuesta, cliente)
+        except Exception as e:
+            st.error(f"❌ Error creando carpeta en Drive: {e}")
+            st.stop()
 
-    # === DEBUG TEMPORAL ===
-    try:
-        # Verificar que el folder existe y tenemos acceso
-        folder_check = drive_service.files().get(fileId=FOLDER_ID, fields="id, name, mimeType").execute()
-        st.info(f"✅ Carpeta encontrada: {folder_check.get('name')} ({folder_check.get('mimeType')})")
-    except Exception as e:
-        st.error(f"❌ Error accediendo a la carpeta: {e}")
-        st.stop()
+        st.write("☁️ Subiendo PDF a Drive...")
+        filename = f"Cotizacion_{numero:04d}_{cliente.replace(' ', '_')}.pdf"
+        try:
+            file_metadata = {"name": filename, "parents": [carpeta_destino_id]}
+            media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype="application/pdf")
+            drive_service.files().create(
+                body=file_metadata, media_body=media, fields="id"
+            ).execute()
+        except Exception as e:
+            st.error(f"❌ Error subiendo a Drive: {e}")
+            st.stop()
 
-    try:
-        file_metadata = {'name': filename, 'parents': [FOLDER_ID]}
-        media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf')
-        result = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        st.info(f"✅ Archivo creado con ID: {result.get('id')}")
-    except Exception as e:
-        st.error(f"❌ Error al crear archivo en Drive: {e}")
-        st.stop()
-    # === FIN DEBUG ===
+        status.update(
+            label=f"✅ Cotización #{numero:04d} guardada correctamente",
+            state="complete"
+        )
 
-    st.success(f"✅ Cotización #{numero:04d} guardada en la carpeta Cotizador")
+    st.success(f"📂 Ruta en Drive: Cotizaciones / {anio} / {tipo_propuesta} / {cliente} / {filename}")
     st.balloons()
 
-    st.download_button("📥 Descargar PDF ahora", data=pdf_bytes, file_name=filename, mime="application/pdf")
+    st.download_button(
+        "📥 Descargar PDF",
+        data=pdf_bytes,
+        file_name=filename,
+        mime="application/pdf"
+    )
 
-    st.session_state.productos_cotizacion = []   # Limpiar después de generar
+    st.session_state.productos_cotizacion = []
