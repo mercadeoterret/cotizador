@@ -132,6 +132,10 @@ En Terret, el proceso de Custom representa la máxima expresión de personalizac
 </html>
 """)
 
+# ====================== INICIALIZACIÓN SEGURA ======================
+if "items" not in st.session_state or not isinstance(st.session_state.items, list):
+    st.session_state.items = []
+
 # ====================== INTERFAZ ======================
 st.title("📄 Cotizador Terret 2026")
 
@@ -142,10 +146,6 @@ titulos = ["PROPUESTA COMERCIAL CAMISETAS", "PROPUESTA COMERCIAL MERCH", "PROPUE
 titulo_propuesta = st.selectbox("Título de la propuesta comercial", titulos + ["Personalizado..."])
 if titulo_propuesta == "Personalizado...":
     titulo_propuesta = st.text_input("Escribe el título personalizado")
-
-# Inicialización segura de la lista
-if "items" not in st.session_state:
-    st.session_state.items = []
 
 st.subheader("Agregar productos")
 
@@ -159,15 +159,15 @@ with col3:
         row = productos_df[productos_df["nombre_producto"] == producto_sel].iloc[0]
         precio = obtener_precio(row, cantidad)
         st.session_state.items.append({
-            "referencia": row.get("referencia", ""),
-            "nombre": row["nombre_producto"],
+            "referencia": str(row.get("referencia", "")),
+            "nombre": str(row["nombre_producto"]),
             "cantidad": cantidad,
             "precio_unitario": precio,
             "total_linea": cantidad * precio
         })
         st.success(f"{producto_sel} agregado (precio según escala)")
 
-# Mostrar tabla de forma segura
+# Mostrar tabla de forma 100% segura
 if st.session_state.items:
     df_items = pd.DataFrame(st.session_state.items)
     st.dataframe(df_items, use_container_width=True)
@@ -216,4 +216,4 @@ if st.button("🚀 Generar y Guardar PDF completo (6 páginas)", type="primary")
 
     st.download_button("📥 Descargar PDF ahora", data=pdf_bytes, file_name=filename, mime="application/pdf")
 
-    st.session_state.items = []
+    st.session_state.items = []   # Limpiar después de generar
