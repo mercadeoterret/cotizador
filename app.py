@@ -224,9 +224,24 @@ if st.button("🚀 Generar y Guardar PDF completo (6 páginas)", type="primary")
 
     filename = f"Cotizacion_{numero:04d}_{cliente.replace(' ', '_')}.pdf"
 
-    file_metadata = {'name': filename, 'parents': [FOLDER_ID]}
-    media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf')
-    drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    # === DEBUG TEMPORAL ===
+    try:
+        # Verificar que el folder existe y tenemos acceso
+        folder_check = drive_service.files().get(fileId=FOLDER_ID, fields="id, name, mimeType").execute()
+        st.info(f"✅ Carpeta encontrada: {folder_check.get('name')} ({folder_check.get('mimeType')})")
+    except Exception as e:
+        st.error(f"❌ Error accediendo a la carpeta: {e}")
+        st.stop()
+
+    try:
+        file_metadata = {'name': filename, 'parents': [FOLDER_ID]}
+        media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf')
+        result = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        st.info(f"✅ Archivo creado con ID: {result.get('id')}")
+    except Exception as e:
+        st.error(f"❌ Error al crear archivo en Drive: {e}")
+        st.stop()
+    # === FIN DEBUG ===
 
     st.success(f"✅ Cotización #{numero:04d} guardada en la carpeta Cotizador")
     st.balloons()
