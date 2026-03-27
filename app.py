@@ -30,9 +30,11 @@ drive_service = get_drive_service()
 ROOT_FOLDER_ID = st.secrets["drive"]["folder_id"]  # Carpeta raíz "Cotizaciones"
 
 # ====================== GESTIÓN DE CARPETAS EN DRIVE ======================
+SHARED_DRIVE_ID = "0ADBazL1-XZo6Uk9PVA"  # ID raíz del Shared Drive
+
 def obtener_o_crear_carpeta(nombre, parent_id):
     """Busca una carpeta por nombre dentro de parent_id. Si no existe, la crea."""
-    nombre_escapado = nombre.replace("'", "\\'")
+    nombre_escapado = nombre.replace("'", "\'")
     query = (
         f"name='{nombre_escapado}' "
         f"and '{parent_id}' in parents "
@@ -42,7 +44,10 @@ def obtener_o_crear_carpeta(nombre, parent_id):
     results = drive_service.files().list(
         q=query,
         fields="files(id, name)",
-        spaces="drive"
+        corpora="drive",
+        driveId=SHARED_DRIVE_ID,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
     ).execute()
     archivos = results.get("files", [])
     if archivos:
@@ -53,7 +58,11 @@ def obtener_o_crear_carpeta(nombre, parent_id):
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [parent_id]
     }
-    carpeta = drive_service.files().create(body=metadata, fields="id").execute()
+    carpeta = drive_service.files().create(
+        body=metadata,
+        fields="id",
+        supportsAllDrives=True
+    ).execute()
     return carpeta["id"]
 
 def obtener_carpeta_destino(anio, tipo, cliente):
@@ -78,7 +87,11 @@ def listar_clientes_en_drive(anio, tipo):
         results = drive_service.files().list(
             q=query,
             fields="files(name)",
-            orderBy="name"
+            orderBy="name",
+            corpora="drive",
+            driveId=SHARED_DRIVE_ID,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
         ).execute()
         return [f["name"] for f in results.get("files", [])]
     except Exception:
@@ -367,7 +380,8 @@ if st.button("🚀 Generar y Guardar PDF", type="primary", disabled=not puede_ge
             file_metadata = {"name": filename, "parents": [carpeta_destino_id]}
             media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype="application/pdf")
             drive_service.files().create(
-                body=file_metadata, media_body=media, fields="id"
+                body=file_metadata, media_body=media, fields="id",
+                supportsAllDrives=True
             ).execute()
         except Exception as e:
             st.error(f"❌ Error subiendo a Drive: {e}")
