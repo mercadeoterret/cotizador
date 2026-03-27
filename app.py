@@ -61,9 +61,17 @@ def obtener_precio(row, cantidad):
 
 # ====================== NÚMERO CONSECUTIVO ======================
 def obtener_siguiente_numero():
-    df_config = conn.read(worksheet="Config")
-    num = int(df_config.iloc[0, 1])
-    conn.update(worksheet="Config", data=pd.DataFrame([[num + 1]]), range="B1")
+    # Leer sin cache para siempre obtener el valor actual
+    df_config = conn.read(worksheet="Config", ttl=0)
+    df_config = df_config.dropna(how="all")
+    # conn.read() usa la fila 1 como header, el numero queda en iloc[0, 1]
+    try:
+        num = int(float(str(df_config.iloc[0, 1]).strip()))
+    except (ValueError, IndexError, TypeError) as e:
+        st.error(f"Error leyendo Config: {e}. Verifica que B2 tenga el numero consecutivo.")
+        st.stop()
+    df_config.iloc[0, 1] = num + 1
+    conn.update(worksheet="Config", data=df_config)
     return num
 
 # ====================== PLANTILLA HTML ======================
@@ -168,10 +176,11 @@ with col3:
         st.success(f"{producto_sel} agregado (precio según escala)")
 
 # Mostrar tabla de forma SEGURA
+total_general = 0.0
 if st.session_state.productos_cotizacion:
     df_items = pd.DataFrame(st.session_state.productos_cotizacion)
     st.dataframe(df_items, use_container_width=True)
-    total_general = df_items["total_linea"].sum()
+    total_general = float(df_items["total_linea"].sum())
     st.metric("TOTAL GENERAL (antes de IVA)", f"${total_general:,.0f}")
 
 # ====================== GENERAR PDF ======================
