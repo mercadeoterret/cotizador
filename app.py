@@ -17,8 +17,14 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_resource
 def get_drive_service():
     creds_dict = st.secrets["connections"]["gsheets"]
-    creds = service_account.Credentials.from_service_account_info(creds_dict)
-    return build('drive', 'v3', credentials=creds)
+    scopes = [
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/drive.file",
+    ]
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict, scopes=scopes
+    )
+    return build("drive", "v3", credentials=creds)
 
 drive_service = get_drive_service()
 FOLDER_ID = st.secrets["drive"]["folder_id"]
