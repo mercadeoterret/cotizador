@@ -132,8 +132,8 @@ En Terret, el proceso de Custom representa la máxima expresión de personalizac
 </html>
 """)
 
-# ====================== INICIALIZACIÓN SEGURA ======================
-if "items" not in st.session_state or not isinstance(st.session_state.items, list):
+# ====================== INICIALIZACIÓN SEGURA DEL SESSION STATE ======================
+if "items" not in st.session_state:
     st.session_state.items = []
 
 # ====================== INTERFAZ ======================
@@ -167,7 +167,7 @@ with col3:
         })
         st.success(f"{producto_sel} agregado (precio según escala)")
 
-# Mostrar tabla de forma 100% segura
+# Mostrar tabla de forma SEGURA
 if st.session_state.items:
     df_items = pd.DataFrame(st.session_state.items)
     st.dataframe(df_items, use_container_width=True)
